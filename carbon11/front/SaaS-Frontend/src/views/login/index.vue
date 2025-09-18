@@ -1,0 +1,958 @@
+<template>
+  <div class="pageContainer">
+    <div class="video-overlay-container">
+      <video autoplay loop muted class="background-video">
+        <source src="@/assets/videos/shu1.mp4" type="video/mp4">
+        您的浏览器不支持视频播放。
+      </video>
+      <div class="video-overlay"></div>
+    </div>
+    <div class="left-text-container">
+      <p class="left-main-text">1997年 《京都议定书》签订，是全球首个具有法律约束力的温室气体减排协议，人类团结起来，解决共同的生存困境。</p>
+      <p class="left-quote-text">“单丝不成线，独木不成林。”</p>
+    </div>
+    <div>
+      <img class="logo" :src="loginLogo" />
+    </div>
+    <div class="loginContiner">
+      <!-- 移除左侧图片相关div -->
+      <div class="loginInputContainer" :class="[fullWidth > 768 ? 'containerSamll' : 'containerBig']">
+        <div class="index_from page-account-container">
+          <div class="page-account-top">
+            <img :src="loginCompanyIcon" />
+          </div>
+          <el-form ref="loginForm" :model="loginForm" :rules="loginRules" class="login-form" autocomplete="on"
+                   label-position="left" @keyup.enter="handleLogin">
+            <div class="login-input">
+              <span class="txt1">用户名</span>
+              <img class="label1" referrerpolicy="no-referrer" src="@/assets/imgs/label1.jpg" />
+              <input class="user-input" ref="account" v-model="loginForm.account" name="username" type="text"
+                     placeholder="请输入用户名" autocomplete="on" />
+            </div>
+
+            <div class="login-input">
+              <span class="txt1">密&nbsp;&nbsp;&nbsp;码</span>
+              <img class="label1" referrerpolicy="no-referrer" src="@/assets/imgs/label1.jpg" />
+              <input class="pwd-input" :key="passwordType" ref="pwd" v-model="loginForm.pwd" :type="passwordType"
+                     placeholder="请输入密码" name="pwd" auto-complete="on" />
+              <span class="show-pwd" @click="showPwd">
+              <svg-icon :icon-class="passwordType === 'password' ? 'eye' : 'eye-open'" />
+            </span>
+            </div>
+
+            <div class="section6">
+              <el-checkbox label="记住我" @change="handleChecked" v-model="loginForm.rememberMe"></el-checkbox>
+            </div>
+
+            <div class="acea-row">
+              <el-button :loading="loading" class="login" style="
+                width: 100%;
+                margin-bottom: 30px;
+                /*background: #2ec28b;*/
+                background: rgb(46, 150, 110);
+                border: 1px solid rgb(46, 150, 110);
+                height: 50px;
+                font-size: 15px;
+              " @click.native.prevent="handleLogin">登录
+              </el-button>
+            </div>
+            <div class="acea-row" style="display: flex; justify-content: space-between">
+              <div style="display: flex">
+                <a class="acss">还没有账号？</a>
+                <el-link type="success" class="login-text" href="/reg">去注册</el-link>
+              </div>
+              <el-link type="info" href="/forgetPassWord" class="acss">忘记密码</el-link>
+            </div>
+          </el-form>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { validUsername } from "@/utils/validate";
+import { getLoginPicApi, captchaApi, codeCheckApi, login } from "@/api/user";
+import { getStoreStaff } from "@/libs/public";
+import { getWXCodeByUrl, loginByWxCode } from "@/libs/wechat";
+import { getWechatConfig } from "@/api/wxApi";
+import { getToken, removeToken, setToken } from "@/utils/auth";
+import Cookies from "js-cookie";
+export default {
+  name: "Login",
+  data() {
+    const validateUsername = (rule, value, callback) => {
+      if (!validUsername(value)) {
+        callback(new Error("Please enter the correct user name"));
+      } else {
+        callback();
+      }
+    };
+    const validatePassword = (rule, value, callback) => {
+      if (value.length < 6 || value.length > 12) {
+        callback(new Error("密码位数为6-12位"));
+      } else {
+        callback();
+      }
+    };
+    return {
+      loginLogo: require("@/assets/videos/logol.png"),
+      captchatImg: require("@/assets/imgs/no.png"),
+      loginLeftPic: require("@/assets/imgs/login_left_pic.png"),
+      loginCompanyIcon: require("@/assets/imgs/icon_login_company.png"),
+      swiperList: [],
+      fullWidth: document.body.clientWidth,
+      swiperOption: {
+        pagination: {
+          el: ".pagination",
+        },
+        autoplay: {
+          enabled: true,
+          disableOnInteraction: false,
+          delay: 3000,
+        },
+      },
+      loginForm: {
+        account: "", // admin
+        pwd: "",
+        key: "",
+        code: "",
+        wxCode: "",
+        rememberMe: false,
+      },
+      loginRules: {
+        account: [{ required: true, trigger: "blur" }], // validator: validateUsername
+        pwd: [{ required: true, trigger: "blur", validator: validatePassword }],
+        code: [
+          { required: true, message: "请输入正确的验证码", trigger: "blur" },
+        ],
+      },
+      passwordType: "password",
+      capsTooltip: false,
+      loading: false,
+      showDialog: false,
+      redirect: undefined,
+      otherQuery: {},
+    };
+  },
+  watch: {
+    fullWidth(val) {
+      // 为了避免频繁触发resize函数导致页面卡顿，使用定时器
+      if (!this.timer) {
+        // 一旦监听到的screenWidth值改变，就将其重新赋给data里的screenWidth
+        this.screenWidth = val;
+        this.timer = true;
+        const that = this;
+        setTimeout(function () {
+          // 打印screenWidth变化的值
+          that.timer = false;
+        }, 400);
+      }
+    },
+    $route: {
+      handler: function (route) {
+        const query = route.query;
+        if (query) {
+          this.redirect = query.redirect;
+          this.otherQuery = this.getOtherQuery(query);
+        }
+      },
+      immediate: true,
+    },
+  },
+  created() {
+    const _this = this;
+    document.onkeydown = function (e) {
+      if (_this.$route.path.indexOf("login") !== -1) {
+        const key = window.event.keyCode;
+        if (key === 13) {
+          _this.handleLogin();
+        }
+      }
+    };
+    window.addEventListener("resize", this.handleResize);
+  },
+  mounted() {
+    // this.getInfo()
+    if (this.loginForm.accountName === "") {
+      this.$refs.accountName.focus();
+    } else if (this.loginForm.password === "") {
+      this.$refs.password.focus();
+    }
+    // this.getCaptcha()
+    // this.agentWeiXinLogin()
+  },
+  destroyed() {
+    // window.removeEventListener('storage', this.afterQRScan)
+  },
+  beforeDestroy: function () {
+    window.removeEventListener("resize", this.handleResize);
+  },
+  methods: {
+    handleChecked() {
+      // this.$store.dispatch('user/name', this.loginForm.accountName)
+      this.rememberMe = !this.rememberMe;
+    },
+    clickReg() {
+      let routeData = this.$router.resolve({ path: "reg" });
+      window.open(routeData.href, "_blank");
+    },
+    clickforgetPassWord() {
+      let routeData = this.$router.resolve({ path: "forgetPassWord" });
+      window.open(routeData.href, "_blank");
+    },
+
+    agentWeiXinLogin() {
+      // 判断是否需要微信公众号登陆
+      const _isWechat = this.$wechat.isWeixin();
+      if (_isWechat) {
+        let code = this.$route.query.code;
+        let state = this.$route.query.state;
+        let wxAuthPath = location.origin + "/login";
+        //  如果没有code 去获取
+        if (null == code) {
+          getWXCodeByUrl(wxAuthPath, "step1");
+        }
+        // 如果有state=step1 根据code去登陆
+        if (state === "step1") {
+          loginByWxCode(code)
+            .then((res) => {
+              sessionStorage.setItem("token", res.token);
+              this.$router.push({
+                path: this.redirect || "/",
+                query: this.otherQuery,
+              });
+            })
+            .catch((err) => {
+              // 如果登陆失败，那么输入账号登陆，重新获取code传递给后端做绑定
+              getWXCodeByUrl(wxAuthPath, "step2");
+            });
+        } else if (state === "step2") {
+          this.loginForm.wxCode = code;
+        }
+      }
+    },
+    onWechat() {
+      let url = this.$route.query.redirect
+        ? this.$route.query.redirect
+        : "/dashboard";
+      this.$wechat.oAuth(url, "login");
+    },
+    handleResize(event) {
+      this.fullWidth = document.body.clientWidth;
+    },
+    getInfo() {
+      // getLoginPicApi().then(res => {
+      //   this.swiperList = res.banner
+      //   this.loginLogo = res.logo
+      //   this.backgroundImages = res.backgroundImage
+      //   // Cookies.set('MerInfo', JSON.stringify(data))
+      // })
+    },
+    checkCapslock(e) {
+      const { key } = e
+      this.capsTooltip = key && key.length === 1 && (key >= 'A' && key <= 'Z')
+    },
+    showPwd() {
+      if (this.passwordType === 'password') {
+        this.passwordType = ''
+      } else {
+        this.passwordType = 'password'
+      }
+      this.$nextTick(() => {
+        this.$refs.pwd.focus()
+      })
+    },
+    handleLogin() {
+      const code = this.$route.query.code;
+      this.$refs.loginForm.validate(valid => {
+        if (valid) {
+          // this.$store.dispatch("user/setRemember",this.rememberMe)
+          this.loading = true
+          this.$router.push({ path: '' })
+          // if(this.$wechat.isWeixin()){
+          //   this.loginForm.wxCode = code
+          // }
+          // this.$router.push({ path: this.redirect || '/', query: this.otherQuery })
+          this.$store.dispatch('user/login', this.loginForm)
+            .then(() => {
+              this.$router.push({ path: this.redirect || '/', query: this.otherQuery })
+              if (this.loginForm.rememberMe) {
+                localStorage.setItem(
+                  "login-form",
+                  JSON.stringify(this.loginForm)
+                );
+              }
+              // getStoreStaff()
+              this.loading = false
+            }).catch((err) => {
+            this.loading = false
+            if (err && err.code == 40006) {//未开户
+              this.$router.push({ path: '/loginErrSwiper' })
+            } else if (err && err.code == 40005) {//账号禁用
+              this.$router.push({ path: '/loginErrSwiper' })
+            } else {
+              this.$router.push({ path: this.redirect || '/', query: this.otherQuery })
+            }
+            // if(this.$wechat.isPhone()) this.$dialog.error(err.message);
+            // this.getCaptcha()
+          })
+        } else {
+          return false
+        }
+      })
+
+      // this.$refs.loginForm.validate(valid => {
+      //   if (valid) {
+      //     // this.loading = true
+      //     var data = {
+      //       accountName: "admin",
+      //       password: "123456"
+      //     }
+      //     login(data).then(() => {
+      //       this.$router.push({ path: this.redirect || '/', query: this.otherQuery })
+      //         // getStoreStaff()
+      //         // this.loading = false
+      //       }).catch((err) => {
+      //         alert(err)
+      //       // this.loading = false
+      //       // if(this.$wechat.isPhone()) this.$dialog.error(err.message);
+      //       // this.getCaptcha()
+      //     })
+      //     }
+      // })
+    },
+    getCaptcha() {
+      captchaApi()
+        .then((data) => {
+          this.captchatImg = data.code;
+          this.loginForm.key = data.key;
+        })
+        .catch(({ message }) => {
+          this.$message.error(message);
+        });
+    },
+    getOtherQuery(query) {
+      return Object.keys(query).reduce((acc, cur) => {
+        if (cur !== "redirect") {
+          acc[cur] = query[cur];
+        }
+        return acc;
+      }, {});
+    },
+  },
+};
+</script>
+
+<style lang="scss">
+$screen-md: 768px;
+$font-size-base: 14px;
+$animation-time: 0.3s;
+$animation-time-quick: 0.15s;
+$transition-time: 0.2s;
+$ease-in-out: ease-in-out;
+$subsidiary-color: #808695;
+
+.footer {
+  align-items: center;
+  justify-content: center;
+  width: 50%;
+  height: 36px;
+  cursor: pointer;
+}
+
+.wechat {
+  width: 26px;
+  height: 26px;
+
+  img {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.page-account {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  overflow: auto;
+
+  &-container {
+    flex: 1;
+    padding: 32px 0;
+    text-align: center;
+    width: 384px;
+    margin: 0 auto;
+
+    &-result {
+      width: 100%;
+    }
+  }
+
+  &-tabs {
+    .ivu-tabs-bar {
+      border-bottom: none;
+    }
+
+    .ivu-tabs-nav-scroll {
+      text-align: center;
+    }
+
+    .ivu-tabs-nav {
+      display: inline-block;
+      float: none;
+    }
+  }
+
+  &-top {
+    padding: 32px 0;
+
+    &-logo {
+      img {
+        max-height: 75px;
+      }
+    }
+
+    &-desc {
+      font-size: $font-size-base;
+      color: $subsidiary-color;
+    }
+  }
+
+  &-auto-login {
+    margin-bottom: 24px;
+    text-align: left;
+
+    a {
+      float: right;
+    }
+  }
+
+  &-other {
+    margin: 24px 0;
+    text-align: left;
+
+    span {
+      font-size: $font-size-base;
+    }
+
+    img {
+      width: 24px;
+      margin-left: 16px;
+      cursor: pointer;
+      vertical-align: middle;
+      opacity: 0.7;
+      transition: all $transition-time $ease-in-out;
+
+      &:hover {
+        opacity: 1;
+      }
+    }
+  }
+
+  .ivu-poptip,
+  .ivu-poptip-rel {
+    display: block;
+  }
+
+  &-register {
+    float: right;
+
+    &-tip {
+      text-align: left;
+
+      &-title {
+        font-size: $font-size-base;
+      }
+
+      &-desc {
+        white-space: initial;
+        font-size: $font-size-base;
+        margin-top: 6px;
+      }
+    }
+  }
+
+  &-to-login {
+    text-align: center;
+    margin-top: 16px;
+  }
+
+  &-header {
+    text-align: right;
+    position: fixed;
+    top: 16px;
+    right: 24px;
+  }
+}
+
+.labelPic {
+  position: absolute;
+  right: 0;
+}
+
+@media (min-width: $screen-md) {
+  .page-account {
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: cover;
+  }
+
+  .page-account-container {
+    padding: 32px 0 24px 0;
+    position: relative;
+  }
+}
+
+.page-account {
+  display: flex;
+}
+
+.page-account .code {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-account .code .pictrue {
+  height: 40px;
+}
+
+.swiperPross {
+  border-radius: 6px 0px 0px 6px;
+  overflow: hidden;
+}
+
+.swiperPross,
+.swiperPic,
+.swiperPic img {
+  width: 286px;
+  height: 100%;
+}
+
+.swiperPic img {
+  width: 100%;
+  height: 100%;
+}
+
+.containerSamll {
+  background: #fff !important;
+}
+
+.containerBig {
+  width: auto !important;
+  background: #f7f7f7 !important;
+}
+
+.index_from {
+  padding: 0 40px 32px 40px;
+  height: 400px;
+  box-sizing: border-box;
+}
+
+.page-account-top {
+  padding: 20px 0 !important;
+  box-sizing: border-box !important;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.page-account-container {
+  border-radius: 0px 6px 6px 0px;
+}
+
+.btn {
+  background: linear-gradient(90deg,
+    rgba(25, 180, 241, 1) 0%,
+    rgba(14, 115, 232, 1) 100%) !important;
+}
+
+::v-deep.el-input__inner {
+  display: flex;
+  align-self: center;
+  background: transparent !important;
+  margin-right: 5px;
+  border: #00ee76;
+}
+
+// 左侧文字样式
+.left-text-container {
+  position: absolute;
+  top: 25%; /* 上移位置，与登录表单上侧对齐 */
+  left: 10%;
+  max-width: 600px; /* 增加宽度使第一句改为两行 */
+  z-index: 2;
+  padding: 20px;
+}
+
+.left-main-text {
+  color: white;
+  font-size: 20px;
+  line-height: 1.6;
+  margin-bottom: 20px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.left-quote-text {
+  color: white;
+  font-size: 24px;
+  line-height: 1.8;
+  font-style: italic;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 768px) {
+  .left-text-container {
+    position: relative;
+    top: 0;
+    left: 0;
+    transform: none;
+    max-width: 100%;
+    margin: 20px auto;
+    text-align: center;
+  }
+
+  .left-main-text {
+    font-size: 16px;
+  }
+
+  .left-quote-text {
+    font-size: 18px;
+  }
+}
+
+.captcha {
+  display: flex;
+  align-items: flex-start;
+}
+
+$bg: #2d3a4b;
+$dark_gray: #889aa4;
+$dark_green: #00ee76;
+$light_gray: #eee;
+
+.imgs {
+  img {
+    height: 36px;
+  }
+}
+
+.login-form {
+  position: relative;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.tips {
+  font-size: 14px;
+  color: #fff;
+  margin-bottom: 10px;
+
+  span {
+    &:first-of-type {
+      margin-right: 16px;
+    }
+  }
+}
+
+.svg-container {
+  padding: 6px 5px 6px 15px;
+  color: $dark_gray;
+  vertical-align: middle;
+  width: 30px;
+  display: inline-block;
+}
+
+.thirdparty-button {
+  position: absolute;
+  right: 0;
+  bottom: 6px;
+}
+
+.login-title {
+  font-size: 18px;
+  color: $dark_green;
+}
+
+.top-nav {
+  background: #fff;
+  height: 50px;
+}
+
+.pageContainer {
+  position: relative;
+  z-index: 1;
+  background-color: transparent !important;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.logo {
+  background: transparent;
+  width: 134px;
+  height: 36px;
+  float: left;
+  margin-left: 40px;
+  margin-top: 30px;
+  z-index: 3;
+}
+
+.loginContiner {
+  width: 100%;
+  display: flex;
+  flex-flow: row;
+  justify-content: flex-end;
+  margin-top: 84px;
+}
+
+.loginLeftPic {
+  flex-grow: 1;
+  height: 705px;
+  z-index: 3;
+}
+
+.loginInputContainer {
+  margin-right: 90px;
+  height: 419px !important;
+  padding: 0 !important;
+  border-radius: 6px;
+  z-index: 2;
+  display: flex;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(5px);
+}
+
+.section3 {
+  height: 1px;
+  background: #2ec28b 50%;
+}
+
+.info1 {
+  background-image: linear-gradient(135deg,
+    rgba(46, 194, 139, 1) 0,
+    rgba(0, 101, 255, 1) 100%);
+  width: 290px;
+  height: 30px;
+  overflow-wrap: break-word;
+  color: rgba(39, 167, 119, 1);
+  font-size: 24px;
+  font-family: FZZZHONGJW--GB1-0;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 30px;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: block;
+}
+
+.word1 {
+  background-image: linear-gradient(135deg,
+    rgba(46, 194, 139, 1) 0,
+    rgba(0, 101, 255, 1) 100%);
+  height: 14px;
+  overflow-wrap: break-word;
+  color: rgba(39, 167, 119, 1);
+  font-size: 14px;
+  letter-spacing: 1.399999976158142px;
+  text-transform: uppercase;
+  font-family: SourceHanSansCN-Regular;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 14px;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: block;
+  margin: 7px 0 0 0px;
+}
+
+.login-input {
+  margin-top: 32px;
+  height: 50px;
+  background: #e5f9f0;
+  display: flex;
+  flex-direction: row;
+  background: rgba(255, 255, 255, 0.6) !important;
+}
+
+.txt1 {
+  width: 45px;
+  height: 15px;
+  overflow-wrap: break-word;
+  color: rgba(23, 43, 77, 1);
+  font-size: 15px;
+  font-family: PingFangSC-Medium;
+  text-align: left;
+  white-space: nowrap;
+  line-height: 15px;
+  display: flex;
+  align-self: center;
+  margin-left: 16px;
+}
+
+.label1 {
+  width: 1px;
+  height: 16px;
+  display: flex;
+  align-self: center;
+  margin-left: 9px;
+  margin-right: 9px;
+}
+
+.user-input {
+  padding: 5px;
+  display: flex;
+  align-self: center;
+  margin-right: 25px;
+  font-size: 15px;
+  line-height: 15px;
+  flex-grow: 1;
+  background-color: transparent;
+  border: 0;
+  outline: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #000;
+}
+
+.pwd-input {
+  padding: 5px;
+  display: flex;
+  align-self: center;
+  margin-right: 5px;
+  font-size: 15px;
+  line-height: 15px;
+  flex-grow: 1;
+  background-color: transparent;
+  border: 0;
+  outline: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #000;
+}
+
+.show-pwd {
+  display: flex;
+  align-self: center;
+  margin-right: 5px;
+  font-size: 16px;
+  color: $dark_gray;
+  cursor: pointer;
+  user-select: none;
+
+  ::v-deep.svg-icon {
+    vertical-align: 0.3em;
+  }
+}
+
+.section6 {
+  margin-top: 10px;
+  margin-bottom: 10px;
+  display: flex;
+
+  .group1 {
+    display: flex;
+    align-self: center;
+    border-radius: 4px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid rgba(179, 186, 197, 1);
+  }
+
+  .word5 {
+    margin-left: 5px;
+    display: flex;
+    align-self: center;
+    color: rgba(94, 108, 132, 1);
+    font-size: 14px;
+  }
+}
+
+.acss {
+  color: #26b581 !important;
+  font-size: 15px;
+  font-family: PingFangSC-Medium;
+}
+
+.login-text {
+  color: #26b581 !important;
+  font-size: 15px;
+  font-family: PingFangSC-Medium;
+}
+
+.login {
+  background-color: rgb(46, 150, 110);
+  width: 80px;
+  height: 32px;
+  //border-radius: 3px;
+  text-align: center;
+  margin-top: auto;
+  margin-bottom: auto;
+  //border-radius: 2px;
+  cursor: pointer;
+  color: white;
+  font-size: 15px;
+  font-family: PingFangSC-Regular, PingFang SC;
+  //border: 1px solid #26b581;
+  border: 1px solid rgb(46, 150, 110);
+
+  &:hover {
+    background: rgb(46, 150, 110);
+    color: white;
+    color: white;
+    font-size: 15px;
+    font-family: PingFangSC-Regular, PingFang SC;
+    border: 1px solid rgb(46, 150, 110);
+  }
+}
+.background-video {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -2;
+}
+.video-container {
+  position: relative;
+  width: 100%;
+  height: auto;
+}
+
+.video-container video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.video-overlay-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+}
+
+.background-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(0, 128, 0, 0.3), rgba(0, 64, 0, 0.5));
+  pointer-events: none;
+}
+</style>

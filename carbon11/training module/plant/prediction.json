@@ -1,0 +1,14 @@
+{
+    "input_parameters": {
+        "treeType": "松树",
+        "plantingAreaAcre": 150.5,
+        "plantingMonths": 36,
+        "soilFertility": "中",
+        "climateType": "温带"
+    },
+    "prediction_result": {
+        "emissionReductionTCO2e": 219.4981,
+        "unit": "TCO2e (吨二氧化碳当量)",
+        "prediction_time": "2025-09-10 15:06:13"
+    }
+}
